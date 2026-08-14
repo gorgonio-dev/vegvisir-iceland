@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Vegvísir · Iceland 3D Trail Explorer</title>
+<meta name="description" content="3D satellite map of Iceland's best hikes, waterfalls and viewpoints, color-coded by difficulty.">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+:root{
+  --ink:#0A111E;--panel:#121B2Bf2;--panel-solid:#141E2F;--line:#24334B;
+  --ice:#DCEEF7;--dim:#8FA6BD;--glacial:#6FD3E7;
+  --easy:#58C486;--mod:#F0A03C;--hard:#E8536B;
+  --r:18px;--safe-b:env(safe-area-inset-bottom,0px);--safe-t:env(safe-area-inset-top,0px);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:'Outfit',system-ui,sans-serif;color:var(--ice);background:var(--ink);overflow:hidden;height:100dvh;touch-action:manipulation}
+h1,h2,h3,.display{font-family:'Bricolage Grotesque','Outfit',sans-serif}
+button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,select,textarea{font-family:inherit;font-size:16px}
+.eyebrow{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--glacial);font-weight:600}
+
+/* ---------- AUTH ---------- */
+#auth{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;justify-content:flex-end;
+  background:radial-gradient(120% 60% at 80% -10%,#14324055 0%,transparent 60%),linear-gradient(180deg,#0A111E 0%,#0C1626 55%,#0A1A22 100%);
+  padding:24px 22px calc(28px + var(--safe-b))}
+#aurora{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+#aurora span{position:absolute;left:-20%;width:140%;height:34vh;filter:blur(42px);opacity:.5;border-radius:50%;animation:drift 14s ease-in-out infinite alternate}
+#aurora span:nth-child(1){top:-6%;background:linear-gradient(90deg,#1de9b622,#58C48655,#6FD3E733)}
+#aurora span:nth-child(2){top:12%;background:linear-gradient(90deg,#6FD3E722,#7c6ff055 40%,#1de9b622);animation-delay:-5s;animation-duration:18s}
+#aurora span:nth-child(3){top:2%;background:linear-gradient(90deg,transparent,#58C48633,transparent);animation-delay:-9s}
+@keyframes drift{from{transform:translateX(-6%) skewY(-4deg)}to{transform:translateX(6%) skewY(3deg)}}
+@media (prefers-reduced-motion:reduce){#aurora span{animation:none}}
+#auth .wordmark{position:relative;margin-bottom:auto;padding-top:calc(16vh + var(--safe-t))}
+#auth h1{font-size:clamp(44px,13vw,64px);font-weight:750;line-height:.95;letter-spacing:-.02em}
+#auth h1 em{font-style:normal;color:var(--glacial)}
+#auth .tag{color:var(--dim);margin-top:10px;font-size:15px;max-width:30ch}
+.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px;backdrop-filter:blur(14px)}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+.field input,.field select,.field textarea{width:100%;background:#0C1422;border:1px solid var(--line);border-radius:12px;color:var(--ice);padding:13px 14px;outline:none}
+.field input:focus,.field textarea:focus{border-color:var(--glacial)}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:15px;border-radius:14px;font-weight:600;font-size:16px;transition:transform .06s}
+.btn:active{transform:scale(.98)}
+.btn:focus-visible,button:focus-visible{outline:2px solid var(--glacial);outline-offset:2px}
+.btn-primary{background:linear-gradient(135deg,#6FD3E7,#58C486);color:#06131a}
+.btn-ghost{background:#ffffff10;border:1px solid var(--line);color:var(--ice);margin-top:10px}
+.btn-danger{background:#E8536B22;border:1px solid #E8536B66;color:var(--hard)}
+.auth-err{color:var(--hard);font-size:14px;min-height:18px;margin:4px 0 8px}
+#auth .legal{color:#5a7089;font-size:12px;text-align:center;margin-top:14px}
+
+/* ---------- APP ---------- */
+#app{position:fixed;inset:0;display:none}
+#map{position:absolute;inset:0;background:#0A111E}
+.maplibregl-ctrl-attrib{font-size:10px;background:#0A111Ecc!important;color:#7d93aa}
+.maplibregl-ctrl-attrib a{color:#9db4cc}
+#topbar{position:absolute;top:calc(10px + var(--safe-t));left:10px;right:10px;z-index:20;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+#brandrow{display:flex;align-items:center;gap:10px;pointer-events:auto}
+#brand{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px 14px;backdrop-filter:blur(12px);flex:1;min-width:0}
+#brand b{font-family:'Bricolage Grotesque';font-weight:700;font-size:17px}
+#brand small{color:var(--dim);font-size:11px;letter-spacing:.16em;text-transform:uppercase}
+#rolechip{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px 12px;backdrop-filter:blur(12px);text-align:center;line-height:1.15}
+#rolechip b{display:block;font-size:13px}
+#rolechip small{color:var(--glacial);font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+#chips{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;pointer-events:auto;padding-bottom:2px}
+#chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;display:flex;align-items:center;gap:7px;padding:9px 14px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--dim);font-size:14px;font-weight:500;backdrop-filter:blur(12px);white-space:nowrap}
+.chip .dot{width:9px;height:9px;border-radius:3px;transform:rotate(45deg)}
+.chip.on{color:#06131a;background:var(--ice);border-color:var(--ice)}
+.chip.on[data-f="easy"]{background:var(--easy);border-color:var(--easy)}
+.chip.on[data-f="moderate"]{background:var(--mod);border-color:var(--mod)}
+.chip.on[data-f="hard"]{background:var(--hard);border-color:var(--hard)}
+#sidebtns{position:absolute;right:10px;bottom:calc(150px + var(--safe-b));z-index:20;display:flex;flex-direction:column;gap:10px}
+.round{width:48px;height:48px;border-radius:16px;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;color:var(--ice)}
+.round.on{background:var(--glacial);color:#06131a;border-color:var(--glacial)}
+#fab{position:absolute;left:10px;bottom:calc(150px + var(--safe-b));z-index:20;display:none;width:52px;height:52px;border-radius:18px;background:linear-gradient(135deg,#6FD3E7,#58C486);color:#06131a;font-size:26px;font-weight:700;align-items:center;justify-content:center;box-shadow:0 6px 20px #0009}
+body.admin #fab{display:flex}
+#dropbanner{position:absolute;top:calc(118px + var(--safe-t));left:50%;transform:translateX(-50%);z-index:25;display:none;background:var(--mod);color:#1b1206;font-weight:600;padding:10px 16px;border-radius:999px;font-size:14px;box-shadow:0 6px 18px #0007;white-space:nowrap}
+#legend{position:absolute;left:10px;bottom:calc(96px + var(--safe-b));z-index:19;display:flex;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:7px 12px;backdrop-filter:blur(12px);font-size:12px;color:var(--dim)}
+#legend i{width:9px;height:9px;border-radius:3px;transform:rotate(45deg);display:inline-block;margin-right:5px}
+
+/* ---------- BOTTOM SHEETS (list + editor) ---------- */
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:30;background:var(--panel-solid);border-radius:22px 22px 0 0;border:1px solid var(--line);border-bottom:none;transform:translateY(105%);transition:transform .32s cubic-bezier(.32,.9,.35,1);max-height:86dvh;display:flex;flex-direction:column;box-shadow:0 -12px 40px #000a}
+.sheet.open{transform:translateY(0)}
+.grip{width:44px;height:5px;border-radius:3px;background:#33445f;margin:10px auto 4px;flex:0 0 auto}
+.sheet-scroll{overflow-y:auto;overscroll-behavior:contain;padding:6px 18px calc(20px + var(--safe-b))}
+#listsheet h2{font-size:20px;margin:6px 2px 12px}
+.rowcard{display:flex;gap:12px;align-items:center;background:#0C1422;border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:9px;width:100%;text-align:left}
+.rowcard .rd{width:12px;height:12px;border-radius:4px;transform:rotate(45deg);flex:0 0 auto}
+.rowcard .rt b{display:block;font-size:15px;font-weight:600}
+.rowcard .rt small{color:var(--dim);font-size:12px}
+.rowcard .arr{margin-left:auto;color:var(--dim)}
+#editsheet h2{font-size:20px;margin:4px 2px 14px}
+.seg{display:flex;gap:8px;margin-bottom:12px}
+.seg button{flex:1;padding:11px;border-radius:12px;border:1px solid var(--line);background:#0C1422;color:var(--dim);font-weight:600;font-size:14px}
+.seg button.on[data-v="easy"]{background:var(--easy);color:#06131a;border-color:var(--easy)}
+.seg button.on[data-v="moderate"]{background:var(--mod);color:#06131a;border-color:var(--mod)}
+.seg button.on[data-v="hard"]{background:var(--hard);color:#06131a;border-color:var(--hard)}
+.seg button.on[data-v="hike"],.seg button.on[data-v="spot"]{background:var(--glacial);color:#06131a;border-color:var(--glacial)}
+
+/* ---------- FULL-SCREEN DETAIL PAGE ---------- */
+#detail{position:fixed;inset:0;z-index:40;background:var(--ink);transform:translateY(102%);transition:transform .34s cubic-bezier(.32,.9,.35,1);display:flex;flex-direction:column}
+#detail.open{transform:translateY(0)}
+#d-scroll{flex:1;overflow-y:auto;overscroll-behavior:contain;padding-bottom:calc(96px + var(--safe-b))}
+#d-hero{position:relative;height:46dvh;min-height:280px;background:#0C1422}
+#d-heroimg{width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .45s}
+#d-heroimg.ready{opacity:1}
+#d-skel{position:absolute;inset:0;background:linear-gradient(110deg,#0f1929 35%,#1a2a42 48%,#0f1929 61%);background-size:220% 100%;animation:sh 1.3s linear infinite}
+@keyframes sh{to{background-position:-120% 0}}
+#d-noimg{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:52px;color:#31506d;background:linear-gradient(140deg,#16344a,#0d1f30)}
+#d-hero .shade{position:absolute;inset:0;background:linear-gradient(180deg,#0A111Ecc 0%,transparent 26%,transparent 55%,#0A111E 100%);pointer-events:none}
+#d-back{position:absolute;top:calc(12px + var(--safe-t));left:12px;width:42px;height:42px;border-radius:14px;background:#0A111Ebb;backdrop-filter:blur(10px);font-size:19px;z-index:3}
+#d-fav{position:absolute;top:calc(12px + var(--safe-t));right:12px;width:42px;height:42px;border-radius:14px;background:#0A111Ebb;backdrop-filter:blur(10px);font-size:18px;z-index:3;display:none}
+#d-fav.shown{display:block}
+#d-fav.on{background:#E8536Bcc;color:#fff}
+#d-count{position:absolute;right:12px;bottom:12px;background:#0A111Ebb;backdrop-filter:blur(8px);padding:6px 12px;border-radius:999px;font-size:12px;color:var(--ice);z-index:3}
+#d-thumbs{display:flex;gap:8px;overflow-x:auto;padding:12px 16px 4px;scrollbar-width:none}
+#d-thumbs::-webkit-scrollbar{display:none}
+#d-thumbs img{width:86px;height:64px;object-fit:cover;border-radius:10px;border:2px solid transparent;flex:0 0 auto}
+#d-thumbs img.on{border-color:var(--glacial)}
+#d-body{padding:10px 18px 0}
+.badges{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px}
+.badge{font-size:12px;font-weight:600;letter-spacing:.06em;padding:5px 11px;border-radius:999px;text-transform:uppercase}
+.badge.diff-easy{background:#58C48622;color:var(--easy);border:1px solid #58C48655}
+.badge.diff-moderate{background:#F0A03C22;color:var(--mod);border:1px solid #F0A03C55}
+.badge.diff-hard{background:#E8536B22;color:var(--hard);border:1px solid #E8536B55}
+.badge.type{background:#6FD3E71a;color:var(--glacial);border:1px solid #6FD3E744}
+.badge.custom{background:#ffffff12;color:var(--dim);border:1px solid var(--line)}
+#d-name{font-size:30px;font-weight:720;line-height:1.02;letter-spacing:-.01em}
+#d-region{color:var(--dim);font-size:13px;margin-top:5px;letter-spacing:.12em;text-transform:uppercase}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 16px}
+.stat{background:#0C1422;border:1px solid var(--line);border-radius:12px;padding:11px;text-align:center}
+.stat b{display:block;font-size:15px}
+.stat small{color:var(--dim);font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+#d-desc{color:#BBD0E2;font-size:15.5px;line-height:1.6;margin-bottom:16px}
+.note{background:#0C1422;border:1px solid var(--line);border-left:3px solid var(--glacial);border-radius:12px;padding:12px 14px;color:var(--dim);font-size:13.5px;line-height:1.5;margin-bottom:16px}
+#d-adminrow{display:none;gap:10px;margin-bottom:16px}
+body.admin #d-adminrow{display:flex}
+#d-adminrow .btn{margin:0;padding:12px}
+#d-actions{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(12px + var(--safe-b));background:linear-gradient(180deg,transparent,#0A111E 30%);display:flex;gap:10px}
+#d-nav{flex:1}
+#d-credit{color:#5a7089;font-size:11.5px;margin:2px 0 18px}
+
+/* ---------- LIGHTBOX ---------- */
+#lb{position:fixed;inset:0;z-index:60;background:#04070d;display:none;flex-direction:column}
+#lb.open{display:flex}
+#lb-strip{flex:1;display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none}
+#lb-strip::-webkit-scrollbar{display:none}
+#lb-strip .slide{flex:0 0 100%;scroll-snap-align:center;display:flex;align-items:center;justify-content:center;padding:8px}
+#lb-strip img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px}
+#lb-top{position:absolute;top:calc(10px + var(--safe-t));left:12px;right:12px;display:flex;justify-content:space-between;align-items:center;z-index:2}
+#lb-close{width:42px;height:42px;border-radius:14px;background:#ffffff18;font-size:18px}
+#lb-idx{background:#ffffff18;padding:8px 14px;border-radius:999px;font-size:13px}
+#lb-cap{position:absolute;bottom:calc(16px + var(--safe-b));left:0;right:0;text-align:center;color:var(--dim);font-size:12px;padding:0 20px}
+
+.toast{position:fixed;left:50%;bottom:calc(30px + var(--safe-b));transform:translateX(-50%) translateY(20px);background:var(--ice);color:#06131a;font-weight:600;padding:12px 18px;border-radius:999px;z-index:90;opacity:0;transition:.3s;pointer-events:none;font-size:14px;white-space:nowrap}
+.toast.show{opacity:1;transform:translateX(-50%)}
+@media (min-width:760px){#topbar{max-width:560px}#detail{left:auto;right:0;width:480px;border-left:1px solid var(--line)}}
+</style>
+</head>
+<body>
+
+<section id="auth">
+  <div id="aurora"><span></span><span></span><span></span></div>
+  <div class="wordmark">
+    <div class="eyebrow">Ísland · 3D trail atlas</div>
+    <h1>Veg<em>vísir</em></h1>
+    <p class="tag">Fly over real satellite terrain. Tap a cairn to open Iceland's best hikes, falls and views — coded easy to hard.</p>
+  </div>
+  <div class="card">
+    <div class="field"><label for="u">Username</label><input id="u" autocomplete="username" placeholder="e.g. Sydney"></div>
+    <div class="field"><label for="p">Password</label><input id="p" type="password" autocomplete="current-password" placeholder="••••••••"></div>
+    <div class="auth-err" id="autherr" role="alert"></div>
+    <button class="btn btn-primary" id="loginbtn">Sign in</button>
+    <button class="btn btn-ghost" id="guestbtn">Explore as guest</button>
+    <p class="legal">Guests can view everything. Signed-in hikers can save favourites; admins can add and edit pins.</p>
+  </div>
+</section>
+
+<main id="app">
+  <div id="map"></div>
+  <div id="topbar">
+    <div id="brandrow">
+      <div id="brand"><b>Vegvísir</b><small>Iceland · satellite 3D</small></div>
+      <button id="rolechip" title="Sign out"><b id="whoami">Guest</b><small id="whatrole">viewer</small></button>
+    </div>
+    <div id="chips" role="tablist" aria-label="Filters">
+      <button class="chip on" data-f="all">All</button>
+      <button class="chip" data-f="easy"><i class="dot" style="background:var(--easy)"></i>Easy</button>
+      <button class="chip" data-f="moderate"><i class="dot" style="background:var(--mod)"></i>Moderate</button>
+      <button class="chip" data-f="hard"><i class="dot" style="background:var(--hard)"></i>Hard</button>
+      <button class="chip" data-f="hike">Hikes</button>
+      <button class="chip" data-f="spot">Spots</button>
+      <button class="chip" data-f="waterfall">💧 Waterfalls</button>
+      <button class="chip" data-f="beach">⚫ Beaches</button>
+      <button class="chip" data-f="geothermal">♨️ Hot springs</button>
+      <button class="chip" data-f="glacier">🧊 Glaciers</button>
+      <button class="chip" data-f="canyon">🏔 Canyons</button>
+      <button class="chip" data-f="fav" id="favchip" hidden>♥ Saved</button>
+    </div>
+  </div>
+  <div id="dropbanner">Tap the map to drop your new pin</div>
+  <div id="sidebtns">
+    <button class="round on" id="btn3d" aria-label="Toggle 3D terrain">3D</button>
+    <button class="round" id="btnlist" aria-label="Open list of places">☰</button>
+    <button class="round" id="btnhome" aria-label="Reset view">⌂</button>
+  </div>
+  <button id="fab" aria-label="Add a new pin">+</button>
+  <div id="legend"><span><i style="background:var(--easy)"></i>Easy</span><span><i style="background:var(--mod)"></i>Moderate</span><span><i style="background:var(--hard)"></i>Hard</span></div>
+
+  <!-- list -->
+  <section class="sheet" id="listsheet" aria-label="All places">
+    <div class="grip"></div>
+    <div class="sheet-scroll">
+      <h2 class="display">Places <span style="color:var(--dim);font-weight:400" id="listcount"></span></h2>
+      <div id="listwrap"></div>
+    </div>
+  </section>
+
+  <!-- editor -->
+  <section class="sheet" id="editsheet" aria-label="Pin editor">
+    <div class="grip"></div>
+    <div class="sheet-scroll">
+      <h2 class="display" id="edittitle">New pin</h2>
+      <div class="field"><label for="e-name">Name</label><input id="e-name" placeholder="e.g. Secret hot spring"></div>
+      <div class="field"><label>Difficulty</label>
+        <div class="seg" id="e-diff"><button data-v="easy">Easy</button><button data-v="moderate" class="on">Moderate</button><button data-v="hard">Hard</button></div>
+      </div>
+      <div class="field"><label>Type</label>
+        <div class="seg" id="e-type"><button data-v="hike" class="on">Hike</button><button data-v="spot">Spot</button></div>
+      </div>
+      <div class="field"><label for="e-region">Region</label><input id="e-region" placeholder="e.g. South Coast"></div>
+      <div class="field"><label for="e-desc">Description</label><textarea id="e-desc" rows="3" placeholder="What makes it worth the stop?"></textarea></div>
+      <div class="field"><label for="e-dist">Distance · Time · Terrain (optional)</label><input id="e-dist" placeholder="e.g. 6 km · 2–3 h · +300 m"></div>
+      <button class="btn btn-primary" id="e-save">Save pin</button>
+      <button class="btn btn-ghost" id="e-cancel">Cancel</button>
+    </div>
+  </section>
+
+  <!-- full-screen place page -->
+  <section id="detail" aria-label="Place details">
+    <div id="d-scroll">
+      <div id="d-hero">
+        <div id="d-skel"></div>
+        <img id="d-heroimg" alt="">
+        <div id="d-noimg">⛰</div>
+        <div class="shade"></div>
+        <span id="d-count"></span>
+      </div>
+      <div id="d-thumbs"></div>
+      <div id="d-body">
+        <div class="badges" id="d-badges"></div>
+        <h2 id="d-name" class="display"></h2>
+        <div id="d-region"></div>
+        <div class="badges"></div>
+        <div class="stats" id="d-stats"></div>
+        <p id="d-desc"></p>
+        <div class="note">Conditions in Iceland change fast — check <b>safetravel.is</b> and <b>vedur.is</b> before heading out, and never turn your back on the surf at black-sand beaches.</div>
+        <div id="d-adminrow">
+          <button class="btn btn-ghost" id="d-edit" style="margin-top:0">Edit pin</button>
+          <button class="btn btn-danger" id="d-del">Delete</button>
+        </div>
+        <p id="d-credit">Photos load live from this place's Wikipedia/Wikimedia Commons article.</p>
+      </div>
+    </div>
+    <button id="d-back" aria-label="Back to map">←</button>
+    <button id="d-fav" aria-label="Save to favourites">♥</button>
+    <div id="d-actions"><a class="btn btn-primary" id="d-nav" target="_blank" rel="noopener">Navigate ↗</a></div>
+  </section>
+
+  <!-- lightbox -->
+  <section id="lb" aria-label="Photo gallery">
+    <div id="lb-top"><span id="lb-idx">1 / 1</span><button id="lb-close" aria-label="Close gallery">✕</button></div>
+    <div id="lb-strip"></div>
+    <div id="lb-cap"></div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+</main>
+
+<script>
+/* =========================================================
+   Vegvísir v2 — terrain-anchored clustered pins,
+   full-screen place pages, multi-photo galleries.
+   ========================================================= */
+const PLACES=[
+ {id:'seljalandsfoss',name:'Seljalandsfoss',diff:'easy',type:'spot',region:'South Coast',lng:-19.9886,lat:63.6156,wiki:'Seljalandsfoss',
+  desc:'A 60 m ribbon waterfall you can walk fully behind — the path loops into a mossy cavern beneath the cliff. Bring a rain shell; the spray is relentless and glorious.',
+  stats:['0.6 km loop','~30 min','Flat + steps']},
+ {id:'skogafoss',name:'Skógafoss',diff:'easy',type:'spot',region:'South Coast',lng:-19.5114,lat:63.5321,wiki:'Skógafoss',
+  desc:'A perfect 60 m curtain of water, 25 m wide, famous for double rainbows in its mist. Climb the 527-step staircase for the ridge-top view where the Fimmvörðuháls trail begins.',
+  stats:['527 steps','~45 min','60 m up']},
+ {id:'gullfoss',name:'Gullfoss',diff:'easy',type:'spot',region:'Golden Circle',lng:-20.1199,lat:64.3271,wiki:'Gullfoss',
+  desc:'The "Golden Falls" — the Hvítá river thunders down two tiers into a 32 m crevice that seems to swallow the river whole. Paved paths reach both the upper rim and the spray-soaked lower ledge.',
+  stats:['1 km paths','~40 min','Boardwalks']},
+ {id:'geysir',name:'Geysir & Strokkur',diff:'easy',type:'spot',region:'Golden Circle',lng:-20.3024,lat:64.3104,wiki:'Strokkur',
+  desc:'The geothermal field that named all geysers. Strokkur erupts 15–30 m roughly every 5–10 minutes — stand upwind and keep the camera rolling.',
+  stats:['0.8 km loop','~30 min','Flat']},
+ {id:'thingvellir',name:'Þingvellir',diff:'easy',type:'spot',region:'Golden Circle',lng:-21.1250,lat:64.2558,wiki:'Þingvellir',
+  desc:'A UNESCO rift valley where the North American and Eurasian plates tear apart — and where the world\u2019s oldest parliament met from 930 AD. Walk the Almannagjá gorge to Öxarárfoss.',
+  stats:['2–4 km','1–2 h','Gentle']},
+ {id:'reynisfjara',name:'Reynisfjara',diff:'easy',type:'spot',region:'Vík · South Coast',lng:-19.0442,lat:63.4063,wiki:'Reynisfjara',
+  desc:'Black volcanic sand, hexagonal basalt columns and the Reynisdrangar sea stacks. Stunning — but never turn your back on the ocean: sneaker waves here are genuinely dangerous.',
+  stats:['Beach walk','~45 min','Flat']},
+ {id:'dyrholaey',name:'Dyrhólaey',diff:'easy',type:'spot',region:'Vík · South Coast',lng:-19.1266,lat:63.4022,wiki:'Dyrhólaey',
+  desc:'A 120 m promontory pierced by a giant sea arch, with puffin colonies May–August and a lighthouse view down the endless black coast.',
+  stats:['1 km paths','~40 min','Clifftop']},
+ {id:'jokulsarlon',name:'Jökulsárlón',diff:'easy',type:'spot',region:'Vatnajökull',lng:-16.2306,lat:64.0784,wiki:'Jökulsárlón',
+  desc:'Iceland\u2019s deepest lake, a glacier lagoon where blue icebergs calve off Breiðamerkurjökull and drift to sea. Seals patrol between the ice.',
+  stats:['Shore walk','~1 h','Flat']},
+ {id:'diamond',name:'Diamond Beach',diff:'easy',type:'spot',region:'Vatnajökull',lng:-16.1770,lat:64.0435,wiki:'Breiðamerkursandur',
+  desc:'Across the road from Jökulsárlón, stranded icebergs glitter like cut glass on jet-black sand — best at low sun after a calving day.',
+  stats:['Beach walk','~30 min','Flat']},
+ {id:'kirkjufell',name:'Kirkjufell',diff:'easy',type:'spot',region:'Snæfellsnes',lng:-23.3068,lat:64.9410,wiki:'Kirkjufell',
+  desc:'The 463 m "Church Mountain" — the most photographed peak in Iceland, framed by the Kirkjufellsfoss cascades. The summit scramble is expert-only; the viewpoint walk is for everyone.',
+  stats:['0.5 km','~20 min','Flat']},
+ {id:'godafoss',name:'Goðafoss',diff:'easy',type:'spot',region:'North Iceland',lng:-17.5502,lat:65.6828,wiki:'Goðafoss',
+  desc:'The "Waterfall of the Gods", a 12 m horseshoe where the lawspeaker cast his pagan idols into the river when Iceland turned Christian in 1000 AD.',
+  stats:['1 km paths','~30 min','Easy']},
+ {id:'dettifoss',name:'Dettifoss',diff:'easy',type:'spot',region:'North Iceland',lng:-16.3845,lat:65.8149,wiki:'Dettifoss',
+  desc:'Europe\u2019s most powerful waterfall: 100 m wide, 44 m of grey glacial meltwater falling with a force you feel in your chest. Short lava-field walk from the west car park.',
+  stats:['2 km RT','~45 min','Rocky']},
+ {id:'bluelagoon',name:'Blue Lagoon',diff:'easy',type:'spot',region:'Reykjanes',lng:-22.4495,lat:63.8804,wiki:'Blue Lagoon (geothermal spa)',
+  desc:'Milky, mineral-rich 38 °C geothermal water in a black lava field near Keflavík airport. Book ahead — it sells out most days.',
+  stats:['Spa','2–4 h','Pre-book']},
+ {id:'hverir',name:'Hverir',diff:'easy',type:'spot',region:'Mývatn · North',lng:-16.8079,lat:65.6412,wiki:'Hverir',
+  desc:'A Mars-orange geothermal field of roaring steam vents and boiling mud pots below Námafjall ridge. The smell is sulphur; the colours are unreal.',
+  stats:['0.8 km loop','~30 min','Flat']},
+ {id:'hallgrimskirkja',name:'Hallgrímskirkja',diff:'easy',type:'spot',region:'Reykjavík',lng:-21.9266,lat:64.1417,wiki:'Hallgrímskirkja',
+  desc:'Reykjavík\u2019s 74.5 m basalt-inspired church. Ride the tower lift for the best view of the capital\u2019s rainbow rooftops and Esja across the bay.',
+  stats:['Tower lift','~30 min','City']},
+ {id:'dynjandi',name:'Dynjandi',diff:'easy',type:'spot',region:'Westfjords',lng:-23.2036,lat:65.7327,wiki:'Dynjandi',
+  desc:'The Westfjords\u2019 crown: a 100 m bridal-veil fall widening down a mountainside, with six smaller falls stacked along the short uphill path.',
+  stats:['1 km RT','~40 min','200 steps']},
+ {id:'svartifoss',name:'Svartifoss hike',diff:'moderate',type:'hike',region:'Skaftafell',lng:-16.9752,lat:64.0275,wiki:'Svartifoss',
+  desc:'From Skaftafell visitor centre, a steady climb to the "Black Falls" pouring over an amphitheatre of dark basalt organ pipes — the columns that inspired Hallgrímskirkja.',
+  stats:['3.7 km RT','1.5–2 h','+140 m']},
+ {id:'reykjadalur',name:'Reykjadalur Hot River',diff:'moderate',type:'hike',region:'Hveragerði',lng:-21.2110,lat:64.0369,wiki:'Reykjadalur',
+  desc:'Hike the Steam Valley past fumaroles and mud pots to a geothermal river warm enough to bathe in — pick your temperature by moving up or downstream. Bring a towel and grippy shoes.',
+  stats:['7 km RT','2.5–3 h','+300 m']},
+ {id:'glymur',name:'Glymur',diff:'moderate',type:'hike',region:'Hvalfjörður',lng:-21.2469,lat:64.3906,wiki:'Glymur',
+  desc:'Iceland\u2019s second-tallest waterfall (198 m) hidden in a mossy canyon. The loop crosses a cave, a log over the river and airy canyon-edge paths — exciting, not casual.',
+  stats:['7.5 km loop','3–4 h','+430 m']},
+ {id:'fagradalsfjall',name:'Fagradalsfjall volcano',diff:'moderate',type:'hike',region:'Reykjanes',lng:-22.2720,lat:63.8910,wiki:'Fagradalsfjall',
+  desc:'Walk across brand-new Earth: lava fields from the 2021–2023 eruptions steam beside marked trails over the ridges of Geldingadalir. Check SafeTravel.is for current access.',
+  stats:['7–10 km','3–4 h','+300 m']},
+ {id:'studlagil',name:'Stuðlagil Canyon',diff:'moderate',type:'hike',region:'East Iceland',lng:-15.3040,lat:65.1600,wiki:'Stuðlagil',
+  desc:'A canyon walled with the densest basalt colonnades in Iceland above a teal glacial river — only revealed when a dam lowered the water in 2009. The east-bank hike earns the floor-level view.',
+  stats:['10 km RT','3 h','Gravel path']},
+ {id:'hverfjall',name:'Hverfjall crater rim',diff:'moderate',type:'hike',region:'Mývatn · North',lng:-16.8730,lat:65.6060,wiki:'Hverfjall',
+  desc:'A 2,500-year-old tephra crater a kilometre across. The short, steep zig-zag to the rim opens a full-circle panorama of Lake Mývatn\u2019s craters and lava.',
+  stats:['3.2 km rim','1–1.5 h','+90 m']},
+ {id:'mulagljufur',name:'Múlagljúfur Canyon',diff:'moderate',type:'hike',region:'Vatnajökull',lng:-16.4080,lat:64.0217,wiki:null,
+  desc:'A local-secret canyon of green spires and the Hangandifoss falls, with Öræfajökull\u2019s ice cap looming behind. Unsigned gravel turn-off west of Jökulsárlón; boggy in places.',
+  stats:['5.5 km RT','2–3 h','+250 m']},
+ {id:'fimmvorduhals',name:'Fimmvörðuháls trek',diff:'hard',type:'hike',region:'Skógar → Þórsmörk',lng:-19.4443,lat:63.6206,wiki:'Fimmvörðuháls',
+  desc:'One of the world\u2019s great day-treks: 26 waterfalls above Skógafoss, a snow-patched pass between the Eyjafjallajökull and Mýrdalsjökull ice caps, craters born in the 2010 eruption, then the descent into Þórsmörk. Summer only; weather turns fast.',
+  stats:['25 km','8–12 h','+1,000 m']},
+ {id:'laugavegur',name:'Laugavegur trail',diff:'hard',type:'hike',region:'Landmannalaugar',lng:-19.0670,lat:63.9830,wiki:'Landmannalaugar',
+  desc:'Iceland\u2019s legendary multi-day route from the rhyolite rainbow mountains and hot springs of Landmannalaugar through obsidian deserts and river fords to Þórsmörk. Huts book out months ahead.',
+  stats:['55 km','3–4 days','Huts/camps']},
+ {id:'hvannadalshnukur',name:'Hvannadalshnúkur',diff:'hard',type:'hike',region:'Öræfajökull',lng:-16.6759,lat:64.0142,wiki:'Hvannadalshnúkur',
+  desc:'Iceland\u2019s highest point (2,110 m) on the rim of the Öræfajökull volcano. A 12–15 hour glacier climb with crevasse terrain — certified guide, crampons and rope required.',
+  stats:['~23 km','12–15 h','+2,000 m']},
+ {id:'askja',name:'Askja & Víti',diff:'hard',type:'hike',region:'Highlands',lng:-16.7500,lat:65.0300,wiki:'Askja',
+  desc:'A remote highland caldera reached only by 4×4 river crossings. Walk across the ash plain to the milky-blue Víti explosion crater beside the deep sapphire lake of Öskjuvatn. Apollo astronauts trained here.',
+  stats:['5 km RT walk','+4×4 access','Jul–Sep']},
+];
+
+/* --- more famous spots: black-sand beaches, waterfalls, glaciers, canyons, hot pools --- */
+const EXTRA_PLACES=[
+ {id:'stokksnes',name:'Stokksnes & Vestrahorn',diff:'easy',type:'spot',region:'Southeast',lng:-14.9784,lat:64.2451,wiki:'Vestrahorn',
+  desc:'Jagged 454 m Vestrahorn rising straight out of black dunes and a mirror-flat tidal lagoon — Iceland\u2019s most dramatic beach photo stop. Small entry fee at the Viking Café gate.',
+  stats:['Dune walk','~1 h','Flat sand']},
+ {id:'djupalonssandur',name:'Djúpalónssandur',diff:'easy',type:'spot',region:'Snæfellsnes',lng:-23.9040,lat:64.7530,wiki:'Djúpalónssandur',
+  desc:'A black pearl-pebble beach below Snæfellsjökull, scattered with the rusted wreck of a 1948 British trawler and the four ancient "lifting stones" fishermen used to prove their strength.',
+  stats:['1 km loop','~45 min','Pebbles']},
+ {id:'solheimasandur',name:'Sólheimasandur plane wreck',diff:'moderate',type:'hike',region:'South Coast',lng:-19.3648,lat:63.4593,wiki:'Sólheimasandur',
+  desc:'A flat but hypnotic walk across a black outwash desert to the abandoned 1973 US Navy DC-3 wreck resting on the sand. No shade, no shelter — skip it in a storm.',
+  stats:['8 km RT','~2 h','Flat sand']},
+ {id:'raudasandur',name:'Rauðasandur',diff:'easy',type:'spot',region:'Westfjords',lng:-23.6440,lat:65.4530,wiki:'Rauðasandur',
+  desc:'Ten kilometres of rare golden-red sand at the foot of the Westfjords cliffs — the shell-sand glows orange to pink with the light, and seals haul out along the lagoon.',
+  stats:['Beach walk','1–2 h','Flat']},
+ {id:'haifoss',name:'Háifoss',diff:'easy',type:'spot',region:'Þjórsárdalur',lng:-19.6870,lat:64.2090,wiki:'Háifoss',
+  desc:'A 122 m plunge — among Iceland\u2019s tallest — sharing one canyon rim with its twin fall Granni. Rough gravel road up; the viewpoint is steps from the car park.',
+  stats:['0.5 km','~30 min','Canyon rim']},
+ {id:'bruarfoss',name:'Brúarfoss',diff:'moderate',type:'hike',region:'Golden Circle',lng:-20.5147,lat:64.2639,wiki:'Brúarfoss',
+  desc:'"Iceland\u2019s bluest waterfall" — dozens of glacial rivulets braiding into an electric-blue chute. The riverside trail passes two smaller falls, Hlauptungufoss and Miðfoss, on the way.',
+  stats:['7 km RT','~2 h','Muddy path']},
+ {id:'hraunfossar',name:'Hraunfossar & Barnafoss',diff:'easy',type:'spot',region:'West Iceland',lng:-20.9750,lat:64.7027,wiki:'Hraunfossar',
+  desc:'A kilometre of spring water seeping straight out of the Hallmundarhraun lava field into the turquoise Hvítá — with the churning Barnafoss chute a two-minute walk upstream.',
+  stats:['1 km paths','~40 min','Boardwalks']},
+ {id:'aldeyjarfoss',name:'Aldeyjarfoss',diff:'easy',type:'spot',region:'North Highlands',lng:-17.3430,lat:65.3670,wiki:'Aldeyjarfoss',
+  desc:'The Skjálfandafljót river punching through a ring of twisted black basalt columns — Goðafoss\u2019s wilder upstream sibling at the edge of the highlands.',
+  stats:['0.8 km','~30 min','Gravel road']},
+ {id:'kvernufoss',name:'Kvernufoss',diff:'easy',type:'spot',region:'South Coast',lng:-19.4780,lat:63.5260,wiki:'Kvernufoss',
+  desc:'Skógafoss\u2019s secret neighbour: a 30 m fall tucked in a hidden gorge you can walk behind, usually with a fraction of the crowds. Trail starts behind the Skógar museum.',
+  stats:['2 km RT','~45 min','Grassy gorge']},
+ {id:'seljavallalaug',name:'Seljavallalaug pool',diff:'moderate',type:'hike',region:'South Coast',lng:-19.6070,lat:63.5657,wiki:'Seljavallalaug',
+  desc:'A 1923 swimming pool built into a mountainside, fed warm by a geothermal trickle beneath Eyjafjallajökull. Rustic (algae, cold changing hut) but unforgettable.',
+  stats:['2.4 km RT','~1 h','Valley path']},
+ {id:'solheimajokull',name:'Sólheimajökull glacier',diff:'moderate',type:'hike',region:'South Coast',lng:-19.3660,lat:63.5303,wiki:'Sólheimajökull',
+  desc:'The most accessible glacier tongue on the south coast — an easy lakeside walk to the ash-streaked ice edge, or crampon walks on the glacier itself with a certified guide.',
+  stats:['2 km RT','~1 h','+guided ice']},
+ {id:'fjadrargljufur',name:'Fjaðrárgljúfur',diff:'easy',type:'spot',region:'South Coast',lng:-18.1719,lat:63.7712,wiki:'Fjaðrárgljúfur',
+  desc:'A 100 m-deep, 2 km serpentine canyon of mossy palagonite spires carved at the end of the last Ice Age. An easy rim path strings together the viewing platforms.',
+  stats:['2 km RT','~1 h','Rim path']},
+];
+
+/* category tags for the new filters (a place can have several) */
+const CATS={
+ seljalandsfoss:['waterfall'],skogafoss:['waterfall'],gullfoss:['waterfall'],godafoss:['waterfall'],
+ dettifoss:['waterfall'],dynjandi:['waterfall'],svartifoss:['waterfall'],glymur:['waterfall','canyon'],
+ haifoss:['waterfall','canyon'],bruarfoss:['waterfall'],hraunfossar:['waterfall'],aldeyjarfoss:['waterfall'],
+ kvernufoss:['waterfall'],kirkjufell:['waterfall'],
+ reynisfjara:['beach'],diamond:['beach','glacier'],dyrholaey:['beach'],stokksnes:['beach'],
+ djupalonssandur:['beach'],solheimasandur:['beach'],raudasandur:['beach'],
+ geysir:['geothermal'],bluelagoon:['geothermal'],hverir:['geothermal'],reykjadalur:['geothermal'],
+ seljavallalaug:['geothermal'],askja:['geothermal'],laugavegur:['geothermal'],
+ jokulsarlon:['glacier'],solheimajokull:['glacier'],hvannadalshnukur:['glacier'],
+ studlagil:['canyon'],mulagljufur:['canyon'],fjadrargljufur:['canyon'],thingvellir:['canyon'],
+};
+const BASE_PLACES=PLACES.concat(EXTRA_PLACES).map(p=>({...p,cats:CATS[p.id]||[]}));
+const mem={};
+const store={
+  get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return k in mem?mem[k]:d}},
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){mem[k]=v}}
+};
+
+/* ---------- auth ---------- */
+const USERS={'admin':{pw:'grincho',role:'admin'},'sydney':{pw:'Hiker121!',role:'user',display:'Sydney'}};
+let session=store.get('vv_session',null);
+const $=s=>document.querySelector(s);
+const toast=m=>{const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2200)};
+function login(name,pw){
+  const u=USERS[name.trim().toLowerCase()];
+  if(!u||u.pw!==pw){$('#autherr').textContent='Wrong username or password.';return}
+  session={name:u.display||name.trim(),role:u.role};store.set('vv_session',session);enterApp();
+}
+$('#loginbtn').onclick=()=>login($('#u').value,$('#p').value);
+$('#p').addEventListener('keydown',e=>{if(e.key==='Enter')login($('#u').value,$('#p').value)});
+$('#guestbtn').onclick=()=>{session={name:'Guest',role:'guest'};store.set('vv_session',session);enterApp()};
+$('#rolechip').onclick=()=>{if(confirm('Sign out?')){session=null;store.set('vv_session',null);location.reload()}};
+
+/* ---------- data with admin edits ---------- */
+let custom=store.get('vv_custom',[]),hidden=store.get('vv_hidden',[]),overrides=store.get('vv_over',{});
+function allPlaces(){
+  const base=BASE_PLACES.filter(p=>!hidden.includes(p.id)).map(p=>overrides[p.id]?{...p,...overrides[p.id]}:p);
+  return base.concat(custom.map(c=>({...c,custom:true})));
+}
+function byId(id){return allPlaces().find(p=>p.id===id)}
+
+/* ---------- filters / favourites ---------- */
+let filter='all';
+const CAT_FILTERS=['waterfall','beach','geothermal','glacier','canyon'];
+function passes(p){
+  if(filter==='all')return true;
+  if(filter==='fav')return favs().includes(p.id);
+  if(filter==='hike'||filter==='spot')return p.type===filter;
+  if(CAT_FILTERS.includes(filter))return (p.cats||[]).includes(filter);
+  return p.diff===filter;
+}
+const favKey=()=>'vv_fav_'+(session?session.name:'x');
+const favs=()=>store.get(favKey(),[]);
+function toggleFav(id){
+  let f=favs();f=f.includes(id)?f.filter(x=>x!==id):f.concat(id);
+  store.set(favKey(),f);$('#d-fav').classList.toggle('on',f.includes(id));
+  if(filter==='fav')refreshPins();
+  toast(f.includes(id)?'Saved to favourites':'Removed from favourites');
+}
+
+/* ---------- map: pins live INSIDE the GL engine so they stick to terrain ---------- */
+let map,terrainOn=true,mapReady=false,dropMode=false;
+const ICELAND={center:[-18.7,64.95],zoom:5.15};
+const DIFF_COLOR={easy:'#58C486',moderate:'#F0A03C',hard:'#E8536B'};
+
+function placesGeo(){
+  return {type:'FeatureCollection',features:allPlaces().filter(passes).map(p=>({
+    type:'Feature',geometry:{type:'Point',coordinates:[p.lng,p.lat]},
+    properties:{id:p.id,diff:p.diff,custom:!!p.custom}
+  }))};
+}
+function refreshPins(){if(mapReady)map.getSource('places').setData(placesGeo());renderList()}
+
+function buildMap(){
+  map=new maplibregl.Map({
+    container:'map',center:ICELAND.center,zoom:ICELAND.zoom,pitch:0,bearing:0,
+    maxPitch:78,minZoom:4,maxZoom:16.5,attributionControl:{compact:true},
+    style:{
+      version:8,
+      glyphs:'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
+      sources:{
+        sat:{type:'raster',tileSize:256,maxzoom:18,
+          tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+          attribution:'Imagery © Esri, Maxar, Earthstar Geographics · Terrain © Mapzen/AWS'},
+        dem:{type:'raster-dem',encoding:'terrarium',tileSize:256,maxzoom:13,
+          tiles:['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png']}
+      },
+      layers:[
+        {id:'bg',type:'background',paint:{'background-color':'#0A111E'}},
+        {id:'sat',type:'raster',source:'sat',paint:{'raster-fade-duration':180,'raster-saturation':0.05,'raster-contrast':0.04}}
+      ]
+    }
+  });
+  map.touchPitch.enable();
+  map.on('load',()=>{
+    try{map.setTerrain({source:'dem',exaggeration:1.5})}catch(e){}
+    try{map.setSky({'sky-color':'#0d2436','horizon-color':'#33607e','fog-color':'#0A111E','sky-horizon-blend':.6,'horizon-fog-blend':.4,'fog-ground-blend':.7,'atmosphere-blend':['interpolate',['linear'],['zoom'],4,.4,12,.9]})}catch(e){}
+
+    map.addSource('places',{type:'geojson',data:placesGeo(),cluster:true,clusterMaxZoom:10,clusterRadius:52});
+
+    // clusters: white AllTrails-style bubbles with counts
+    map.addLayer({id:'clusters',type:'circle',source:'places',filter:['has','point_count'],paint:{
+      'circle-color':'#F4F8FB','circle-opacity':.96,
+      'circle-radius':['step',['get','point_count'],15,4,18,8,22,15,26],
+      'circle-stroke-width':2,'circle-stroke-color':'#0A111E'
+    }});
+    map.addLayer({id:'cluster-count',type:'symbol',source:'places',filter:['has','point_count'],
+      layout:{'text-field':'{point_count_abbreviated}','text-font':['Noto Sans Regular'],'text-size':13,'text-allow-overlap':true},
+      paint:{'text-color':'#0A111E'}});
+
+    // single pins: glow halo + colored dot, anchored to the terrain
+    map.addLayer({id:'pin-halo',type:'circle',source:'places',filter:['!',['has','point_count']],paint:{
+      'circle-radius':15,'circle-opacity':.28,
+      'circle-color':['match',['get','diff'],'easy',DIFF_COLOR.easy,'moderate',DIFF_COLOR.moderate,DIFF_COLOR.hard]
+    }});
+    map.addLayer({id:'pins',type:'circle',source:'places',filter:['!',['has','point_count']],paint:{
+      'circle-radius':8.5,
+      'circle-color':['match',['get','diff'],'easy',DIFF_COLOR.easy,'moderate',DIFF_COLOR.moderate,DIFF_COLOR.hard],
+      'circle-stroke-width':2.5,'circle-stroke-color':'#FFFFFF'
+    }});
+
+    map.on('click','clusters',e=>{
+      if(dropMode)return;
+      const f=e.features[0];
+      map.easeTo({center:f.geometry.coordinates,zoom:Math.min(map.getZoom()+2.4,13),duration:700});
+    });
+    map.on('click','pins',e=>{
+      if(dropMode)return;
+      const p=byId(e.features[0].properties.id);
+      if(p)openPlace(p);
+    });
+    ['clusters','pins'].forEach(l=>{
+      map.on('mouseenter',l,()=>map.getCanvas().style.cursor='pointer');
+      map.on('mouseleave',l,()=>map.getCanvas().style.cursor='');
+    });
+
+    mapReady=true;renderList();
+    setTimeout(()=>map.easeTo({pitch:38,zoom:5.6,duration:2200}),400);
+  });
+  map.on('click',e=>{
+    if(dropMode)placeDrop(e.lngLat);
+    else{$('#listsheet').classList.remove('open');$('#editsheet').classList.remove('open')}
+  });
+}
+
+/* ---------- full-screen place page ---------- */
+let current=null,photos=[],heroIdx=0;
+function openPlace(p){
+  current=p;photos=[];heroIdx=0;
+  $('#d-name').textContent=p.name;
+  $('#d-region').textContent=p.region||'Iceland';
+  $('#d-desc').textContent=p.desc||'';
+  const B=$('#d-badges');B.innerHTML='';
+  B.insertAdjacentHTML('beforeend',`<span class="badge diff-${p.diff}">${p.diff}</span>`);
+  B.insertAdjacentHTML('beforeend',`<span class="badge type">${p.type==='hike'?'Hike':'Destination'}</span>`);
+  if(p.custom)B.insertAdjacentHTML('beforeend','<span class="badge custom">Admin pin</span>');
+  const S=$('#d-stats');S.innerHTML='';
+  (p.stats||[]).slice(0,3).forEach((v,i)=>{
+    S.insertAdjacentHTML('beforeend',`<div class="stat"><b>${v}</b><small>${['Distance','Time','Terrain'][i]||''}</small></div>`);
+  });
+  S.style.display=(p.stats&&p.stats.length)?'grid':'none';
+  $('#d-nav').href=`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
+  $('#d-fav').classList.toggle('shown',session&&session.role!=='guest');
+  $('#d-fav').classList.toggle('on',favs().includes(p.id));
+  // reset media
+  const hi=$('#d-heroimg');hi.classList.remove('ready');hi.removeAttribute('src');
+  $('#d-skel').style.display='block';$('#d-noimg').style.display='none';
+  $('#d-thumbs').innerHTML='';$('#d-count').textContent='';
+  $('#d-scroll').scrollTop=0;
+  $('#detail').classList.add('open');
+  map.flyTo({center:[p.lng,p.lat],zoom:12.6,pitch:terrainOn?62:0,duration:1600,essential:true});
+  loadPhotos(p);
+}
+$('#d-back').onclick=()=>{ $('#detail').classList.remove('open');current=null; };
+$('#d-fav').onclick=()=>current&&toggleFav(current.id);
+
+/* photos: every usable image from the place's Wikipedia article.
+   Each photo keeps { small, mid, big }:
+   - small = the exact srcset URL Wikipedia returned (always valid)
+   - mid   = the highest-resolution srcset entry (always valid)
+   - big   = an upscaled request that MAY fail if the original is small,
+             so we fall back big → mid → small on error. */
+async function loadPhotos(p){
+  const mine=p;
+  if(!p._photos){
+    p._photos=[];
+    if(p.wiki){
+      try{
+        const r=await fetch('https://en.wikipedia.org/api/rest_v1/page/media-list/'+encodeURIComponent(p.wiki));
+        if(r.ok){
+          const d=await r.json();
+          p._photos=(d.items||[])
+            .filter(i=>i.type==='image'&&i.srcset&&i.srcset.length&&!/\.svg|\.gif|\.ogv|\.webm|logo|icon|[Mm]ap[_\.]|_map|location|Flag_|Coat_of_arms/i.test(i.title||''))
+            .slice(0,12)
+            .map(i=>{
+              const fix=u=>u&&u.startsWith('//')?'https:'+u:u;
+              const small=fix(i.srcset[0].src);
+              const mid=fix(i.srcset[i.srcset.length-1].src);
+              const m=mid.match(/\/(\d{2,4})px-/);
+              const big=m?mid.replace(m[0],'/1100px-'):mid;
+              return {small,mid,big};
+            });
+        }
+      }catch(e){}
+    }
+  }
+  if(current!==mine)return;
+  photos=p._photos;
+  if(!photos.length){$('#d-skel').style.display='none';$('#d-noimg').style.display='flex';return}
+  setHero(0);
+  const T=$('#d-thumbs');T.innerHTML='';
+  photos.forEach((ph,i)=>{
+    const im=document.createElement('img');
+    im.src=ph.small;im.alt=(p.name)+' photo '+(i+1);im.loading='lazy';
+    im.className=i===0?'on':'';
+    im.onclick=()=>setHero(i);
+    im.onerror=()=>{im.remove()};
+    T.appendChild(im);
+  });
+}
+function setHero(i){
+  heroIdx=i;
+  const ph=photos[i];if(!ph)return;
+  const hi=$('#d-heroimg');
+  hi.classList.remove('ready');$('#d-skel').style.display='block';$('#d-noimg').style.display='none';
+  let stage=0; // 0=big 1=mid 2=small
+  const srcs=[ph.big,ph.mid,ph.small];
+  hi.onload=()=>{hi.classList.add('ready');$('#d-skel').style.display='none'};
+  hi.onerror=()=>{
+    stage++;
+    if(stage<srcs.length){hi.src=srcs[stage];return}
+    photos.splice(i,1);
+    if(photos.length)setHero(Math.min(i,photos.length-1));
+    else{$('#d-skel').style.display='none';$('#d-noimg').style.display='flex';$('#d-count').textContent=''}
+  };
+  hi.src=srcs[0];
+  $('#d-count').textContent=(i+1)+' / '+photos.length+' · tap to view';
+  document.querySelectorAll('#d-thumbs img').forEach((t,j)=>t.classList.toggle('on',j===i));
+}
+$('#d-hero').onclick=()=>{if(photos.length)openLb(heroIdx)};
+
+/* lightbox */
+function openLb(start){
+  const S=$('#lb-strip');S.innerHTML='';
+  photos.forEach((ph,i)=>{
+    const d=document.createElement('div');d.className='slide';
+    const im=document.createElement('img');
+    im.alt=(current?current.name:'')+' photo '+(i+1);
+    let stage=0;const srcs=[ph.big,ph.mid,ph.small];
+    im.onerror=()=>{stage++;if(stage<srcs.length)im.src=srcs[stage]};
+    im.src=srcs[0];
+    d.appendChild(im);S.appendChild(d);
+  });
+  $('#lb-cap').textContent=(current?current.name:'')+' — photos via Wikimedia Commons';
+  $('#lb').classList.add('open');
+  requestAnimationFrame(()=>{S.scrollLeft=S.clientWidth*start;updLbIdx()});
+  S.onscroll=updLbIdx;
+}
+function updLbIdx(){
+  const S=$('#lb-strip');
+  const i=Math.round(S.scrollLeft/Math.max(S.clientWidth,1));
+  $('#lb-idx').textContent=(Math.min(i,photos.length-1)+1)+' / '+photos.length;
+}
+$('#lb-close').onclick=()=>$('#lb').classList.remove('open');
+
+/* ---------- filters ---------- */
+document.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{
+  document.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));
+  c.classList.add('on');filter=c.dataset.f;refreshPins();
+}));
+
+/* ---------- list ---------- */
+function renderList(){
+  const w=$('#listwrap');if(!w)return;w.innerHTML='';
+  const ord={easy:0,moderate:1,hard:2};
+  const list=allPlaces().filter(passes).sort((a,b)=>(ord[a.diff]-ord[b.diff])||a.name.localeCompare(b.name));
+  $('#listcount').textContent='· '+list.length;
+  list.forEach(p=>{
+    const b=document.createElement('button');b.className='rowcard';
+    b.innerHTML=`<span class="rd" style="background:${DIFF_COLOR[p.diff]}"></span>
+      <span class="rt"><b>${p.name}</b><small>${p.region||''} · ${p.type==='hike'?'hike':'spot'}${p.stats&&p.stats[0]?' · '+p.stats[0]:''}</small></span>
+      <span class="arr">›</span>`;
+    b.onclick=()=>{$('#listsheet').classList.remove('open');openPlace(p)};
+    w.appendChild(b);
+  });
+  if(!list.length)w.innerHTML='<p style="color:var(--dim);padding:8px 2px">Nothing matches this filter yet. Try another one.</p>';
+}
+$('#btnlist').onclick=()=>{const s=$('#listsheet');const open=s.classList.contains('open');
+  $('#editsheet').classList.remove('open');
+  if(open)s.classList.remove('open');else{renderList();s.classList.add('open')}};
+document.querySelectorAll('.grip').forEach(g=>g.addEventListener('click',()=>g.parentElement.classList.remove('open')));
+
+/* ---------- controls ---------- */
+$('#btn3d').onclick=()=>{
+  terrainOn=!terrainOn;$('#btn3d').classList.toggle('on',terrainOn);
+  try{map.setTerrain(terrainOn?{source:'dem',exaggeration:1.5}:null)}catch(e){}
+  map.easeTo({pitch:terrainOn?55:0,duration:900});
+  toast(terrainOn?'3D terrain on':'Flat map');
+};
+$('#btnhome').onclick=()=>{$('#detail').classList.remove('open');map.flyTo({...ICELAND,pitch:terrainOn?38:0,duration:2000})};
+
+/* ---------- admin: add / edit / delete ---------- */
+let editingId=null,dropLngLat=null;
+$('#fab').onclick=()=>{dropMode=!dropMode;$('#dropbanner').style.display=dropMode?'block':'none'};
+function placeDrop(ll){
+  dropMode=false;$('#dropbanner').style.display='none';dropLngLat=ll;editingId=null;
+  $('#edittitle').textContent='New pin';
+  ['#e-name','#e-region','#e-desc','#e-dist'].forEach(s=>$(s).value='');
+  setSeg('#e-diff','moderate');setSeg('#e-type','hike');
+  $('#editsheet').classList.add('open');
+}
+function setSeg(sel,val){document.querySelectorAll(sel+' button').forEach(b=>b.classList.toggle('on',b.dataset.v===val))}
+function getSeg(sel){const b=document.querySelector(sel+' button.on');return b?b.dataset.v:''}
+document.querySelectorAll('.seg').forEach(seg=>seg.addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  seg.querySelectorAll('button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+}));
+$('#e-cancel').onclick=()=>$('#editsheet').classList.remove('open');
+$('#e-save').onclick=()=>{
+  const name=$('#e-name').value.trim();
+  if(!name){toast('Give the pin a name');return}
+  const data={name,diff:getSeg('#e-diff'),type:getSeg('#e-type'),region:$('#e-region').value.trim()||'Iceland',
+              desc:$('#e-desc').value.trim(),stats:$('#e-dist').value.trim()?$('#e-dist').value.split('·').map(s=>s.trim()):[]};
+  if(editingId){
+    if(BASE_PLACES.find(p=>p.id===editingId)){overrides[editingId]={...overrides[editingId],...data};store.set('vv_over',overrides)}
+    else{custom=custom.map(c=>c.id===editingId?{...c,...data}:c);store.set('vv_custom',custom)}
+    toast('Pin updated');
+  }else{
+    custom.push({id:'c_'+Date.now(),lng:dropLngLat.lng,lat:dropLngLat.lat,wiki:null,...data});
+    store.set('vv_custom',custom);toast('Pin added');
+  }
+  $('#editsheet').classList.remove('open');refreshPins();
+};
+$('#d-edit').onclick=()=>{
+  if(!current)return;editingId=current.id;
+  $('#edittitle').textContent='Edit · '+current.name;
+  $('#e-name').value=current.name;$('#e-region').value=current.region||'';
+  $('#e-desc').value=current.desc||'';$('#e-dist').value=(current.stats||[]).join(' · ');
+  setSeg('#e-diff',current.diff);setSeg('#e-type',current.type);
+  $('#detail').classList.remove('open');$('#editsheet').classList.add('open');
+};
+$('#d-del').onclick=()=>{
+  if(!current)return;
+  if(!confirm('Delete "'+current.name+'" from the map?'))return;
+  if(BASE_PLACES.find(p=>p.id===current.id)){hidden.push(current.id);store.set('vv_hidden',hidden)}
+  else{custom=custom.filter(c=>c.id!==current.id);store.set('vv_custom',custom)}
+  $('#detail').classList.remove('open');refreshPins();toast('Pin deleted');
+};
+
+/* ---------- enter ---------- */
+function enterApp(){
+  $('#auth').style.display='none';$('#app').style.display='block';
+  $('#whoami').textContent=session.name;
+  $('#whatrole').textContent=session.role==='admin'?'admin':(session.role==='user'?'hiker':'viewer');
+  document.body.classList.toggle('admin',session.role==='admin');
+  $('#favchip').hidden=!(session.role==='user'||session.role==='admin');
+  if(!map)buildMap();else{map.resize();refreshPins()}
+}
+if(session)enterApp();
+</script>
+</body>
+</html>
